@@ -4,16 +4,38 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js";
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
+// Skupni CORS headerji
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*", // ali npr. "http://localhost:3000"
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "*",
+  "Content-Type": "application/json",
+};
+
 serve(async (req) => {
-  if (req.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
+  // ⚠️ CORS preflight handler
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
-  // Avtentikacija preko JWT
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+      status: 405,
+      headers: corsHeaders,
+    });
+  }
+
   const authHeader = req.headers.get("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: corsHeaders,
+    });
   }
+
   const token = authHeader.split(" ")[1];
 
   const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -22,10 +44,13 @@ serve(async (req) => {
     },
   });
 
-  // Preveri uporabnika
   const { data: { user }, error: userError } = await supabase.auth.getUser();
+
   if (userError || !user) {
-    return new Response("Unauthorized", { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: corsHeaders,
+    });
   }
 
   try {
@@ -33,18 +58,22 @@ serve(async (req) => {
     const file = formData.get("file") as File;
 
     if (!file) {
-      return new Response("Missing file field", { status: 400 });
+      return new Response(JSON.stringify({ error: "Missing file field" }), {
+        status: 400,
+        headers: corsHeaders,
+      });
     }
 
     if (file.type !== "image/png") {
-      return new Response("Only PNG files allowed", { status: 400 });
+      return new Response(JSON.stringify({ error: "Only PNG files allowed" }), {
+        status: 400,
+        headers: corsHeaders,
+      });
     }
 
-    // Pretvori v Uint8Array
     const fileContent = new Uint8Array(await file.arrayBuffer());
     const fileName = `${user.id}-${Date.now()}.png`;
 
-    // Upload datoteke
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from("uploads")
       .upload(fileName, fileContent, {
@@ -54,23 +83,29 @@ serve(async (req) => {
 
     if (uploadError) {
       console.error("Upload error:", uploadError);
-      return new Response(`Failed to upload file: ${uploadError.message}`, { status: 500 });
+      return new Response(JSON.stringify({ error: uploadError.message }), {
+        status: 500,
+        headers: corsHeaders,
+      });
     }
 
     const { data: publicUrlData } = supabase.storage
       .from("uploads")
       .getPublicUrl(fileName);
 
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       url: publicUrlData.publicUrl,
-      fileName: fileName 
+      fileName: fileName,
     }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: corsHeaders,
     });
 
   } catch (error) {
     console.error("Processing error:", error);
-    return new Response("Failed to process request", { status: 500 });
+    return new Response(JSON.stringify({ error: "Failed to process request" }), {
+      status: 500,
+      headers: corsHeaders,
+    });
   }
 });

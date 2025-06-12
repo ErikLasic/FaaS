@@ -5,21 +5,22 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*", // zamenjaj z domeno za produkcijo
-  "Access-Control-Allow-Methods": "DELETE, OPTIONS",
+  "Access-Control-Allow-Origin": "*", // Priporočeno: zamenjaj z npr. "https://tvoj-frontend.com" za produkcijo
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Vary": "Origin",
 };
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
+    // CORS preflight
     return new Response(null, {
       status: 204,
       headers: CORS_HEADERS,
     });
   }
 
-  if (req.method !== "DELETE") {
+  if (req.method !== "GET") {
     return new Response("Method not allowed", {
       status: 405,
       headers: CORS_HEADERS,
@@ -56,18 +57,16 @@ serve(async (req) => {
       });
     }
 
-    const now = new Date();
-    const cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-
-    const { data, error } = await supabase
+    // Pridobi vse evente trenutno prijavljenega uporabnika
+    const { data: events, error: eventsError } = await supabase
       .from("events")
-      .delete()
-      .lt("event_date", cutoffDate)
-      .select("*");
+      .select("*")
+      .eq("user_id", user.id)
+      .order("event_date", { ascending: true });
 
-    if (error) {
-      console.error("Delete error:", error);
-      return new Response(JSON.stringify({ error: error.message }), {
+    if (eventsError) {
+      console.error("Events fetch error:", eventsError);
+      return new Response(JSON.stringify({ error: eventsError.message }), {
         status: 400,
         headers: {
           ...CORS_HEADERS,
@@ -76,10 +75,12 @@ serve(async (req) => {
       });
     }
 
-    const deletedCount = Array.isArray(data) ? data.length : 0;
-
     return new Response(
-      JSON.stringify({ message: `Izbrisano ${deletedCount} dogodkov, starejših od 24 ur.` }),
+      JSON.stringify({ 
+        events: events || [],
+        user_id: user.id,
+        count: events ? events.length : 0
+      }),
       {
         status: 200,
         headers: {
